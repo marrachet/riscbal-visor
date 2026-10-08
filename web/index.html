@@ -11,50 +11,87 @@ html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",sa
 .box{position:absolute;z-index:1000;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.2)}
 #title{top:10px;left:56px;max-width:60%}#title b{font-size:15px}#title div{color:var(--mut);margin-top:2px}
 #legend{bottom:24px;left:10px}
-#bar{height:10px;width:180px;border-radius:5px;margin:5px 0 3px;background:linear-gradient(90deg,#d73027,#ffffbf,#4575b4)}
-#lbl{display:flex;justify-content:space-between;color:var(--mut);font-size:11px}
-#info{bottom:24px;right:10px;text-align:right;max-width:50%}
+#legend .row{display:flex;align-items:center;gap:8px;margin:2px 0;font-size:12px}
+#legend .sw{width:16px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.25)}
+#legend select{margin-top:6px;width:100%;font-size:12px;padding:3px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+#legend small{display:block;color:var(--mut);margin-top:6px;max-width:220px;line-height:1.3}
+#info{bottom:24px;right:10px;text-align:right;max-width:50%;color:var(--mut)}
 #cv{position:absolute;left:0;top:0;width:100%;height:100%;z-index:450;pointer-events:none}
+.pp b{font-size:14px}.pp .v{font-size:18px;font-weight:700}.pp div{margin-top:3px}.pp .m{color:#5d6c75;font-size:12px}
 </style></head><body>
 <div id="map"></div>
 <div class="box" id="title"><b>RiscBal · Movimiento vertical del terreno</b><div id="meta">Cargando datos…</div></div>
-<div class="box" id="legend">Velocidad (mm/año)<div id="bar"></div><div id="lbl"><span>−10 hundimiento</span><span>0</span><span>+10 elevación</span></div></div>
-<div class="box" id="info"><span id="mode"></span><div id="sel" style="color:var(--mut)">Haz clic en un punto</div></div>
+<div class="box" id="legend"><b>Velocidad vertical (mm/año)</b><div id="rows"></div>
+<select id="filtro"><option value="0">Mostrar todos los puntos</option><option value="2">Ocultar estables (|v| &lt; 2)</option><option value="5">Solo cambio fuerte (|v| ≥ 5)</option></select>
+<small>En zoom alejado, cada burbuja toma el color del valor más extremo de su zona.</small></div>
+<div class="box" id="info"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script>
+// ---- Simbología: 7 clases (umbrales orientativos, editables) ----
+const CLASES=[
+ {max:-10,col:'#b2182b',txt:'Hundimiento muy fuerte'},
+ {max:-5, col:'#ef6548',txt:'Hundimiento fuerte'},
+ {max:-2, col:'#fdae61',txt:'Hundimiento moderado'},
+ {max:2,  col:'#c9ced3',txt:'Estable (dentro del margen de error)'},
+ {max:5,  col:'#92c5de',txt:'Elevación moderada'},
+ {max:10, col:'#4393c3',txt:'Elevación fuerte'},
+ {max:1e9,col:'#2166ac',txt:'Elevación muy fuerte'}];
+const ETQ=['≤ −10','−10 a −5','−5 a −2','−2 a +2 (estable)','+2 a +5','+5 a +10','> +10'];
+function cls(v){for(let i=0;i<CLASES.length;i++)if(v<=CLASES[i].max)return i;return 6}
+document.getElementById('rows').innerHTML=CLASES.map((c,i)=>`<div class="row"><span class="sw" style="background:${c.col}"></span>${ETQ[i]}</div>`).join('');
+
 const map=L.map('map').setView([39.4,2.95],9);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,
  attribution:'© OpenStreetMap · Datos: EGMS © Copernicus (Servicio de Vigilancia del Terreno)'}).addTo(map);
 const cv=document.createElement('canvas');cv.id='cv';map.getContainer().appendChild(cv);const g=cv.getContext('2d');
 const MX=lon=>(lon+180)/360, MY=lat=>{const r=lat*Math.PI/180;return (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2};
-let N=0,X,Y,V,SD,vis=[],ALL=false,raf=0,dpr=1,W=0,H=0;
-function lerp(a,b,t){return a+(b-a)*t}
-function col(v){const t=(Math.max(-10,Math.min(10,v))+10)/20,A=[215,48,39],B=[255,255,191],C=[69,117,180];
- const [s,e,r]=t<.5?[A,B,t*2]:[B,C,(t-.5)*2];return `rgb(${[0,1,2].map(i=>Math.round(lerp(s[i],e[i],r))).join(',')})`}
+let N=0,A,X,Y,V,SD,vis=[],ALL=false,raf=0,dpr=1,W=0,H=0,minAbs=0;
 function resize(){dpr=window.devicePixelRatio||1;const sz=map.getSize();W=sz.x;H=sz.y;cv.width=W*dpr;cv.height=H*dpr;draw()}
 function draw(){cancelAnimationFrame(raf);raf=requestAnimationFrame(render)}
+const f1=x=>(x>0?'+':'')+x.toFixed(1);
 function render(){g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);vis=[];if(!N)return;
- const z=map.getZoom(),S=256*Math.pow(2,z),c=map.getCenter(),cx=MX(c.lng),cy=MY(c.lat);ALL=z>=15;
- let drawn=0;
+ const z=map.getZoom(),S=256*Math.pow(2,z),c=map.getCenter(),cx=MX(c.lng),cy=MY(c.lat);ALL=z>=15;let drawn=0;
  if(ALL){const r=Math.min(10,3+(z-15)*2.5);
-  for(let i=0;i<N;i++){const px=(X[i]-cx)*S+W/2,py=(Y[i]-cy)*S+H/2;if(px<-12||py<-12||px>W+12||py>H+12)continue;
-   g.fillStyle=col(V[i]);g.beginPath();g.arc(px,py,r,0,6.3);g.fill();vis.push([px,py,i]);drawn++}}
- else{const cell=46,gw=Math.ceil(W/cell)+1,gh=Math.ceil(H/cell)+1,n=new Float32Array(gw*gh),sx=new Float32Array(gw*gh),sy=new Float32Array(gw*gh),sv=new Float32Array(gw*gh);
-  for(let i=0;i<N;i++){const px=(X[i]-cx)*S+W/2,py=(Y[i]-cy)*S+H/2;if(px<0||py<0||px>=W||py>=H)continue;
-   const k=Math.floor(px/cell)+Math.floor(py/cell)*gw;n[k]++;sx[k]+=px;sy[k]+=py;sv[k]+=V[i]}
-  for(let k=0;k<n.length;k++){if(!n[k])continue;const m=n[k],r=m==1?4:Math.min(22,9+Math.sqrt(m)*.9);
-   g.globalAlpha=.9;g.fillStyle=col(sv[k]/m);g.beginPath();g.arc(sx[k]/m,sy[k]/m,r,0,6.3);g.fill();g.globalAlpha=1;g.strokeStyle='rgba(0,0,0,.35)';g.stroke();
-   if(m>1&&r>=12){g.fillStyle='#111';g.font='600 11px system-ui';g.textAlign='center';g.textBaseline='middle';g.fillText(m>=1000?(m/1000).toFixed(1)+'k':m,sx[k]/m,sy[k]/m)}drawn++}}
- document.getElementById('mode').textContent=ALL?`Puntos individuales (${drawn.toLocaleString('es')})`:`Agrupados en ${drawn.toLocaleString('es')} zonas · zoom ${z.toFixed(1)}`}
-map.on('click',e=>{const el=document.getElementById('sel');if(!ALL){el.textContent='Acércate más (zoom 15) para ver puntos individuales';return}
- let b=null,bd=16;for(const q of vis){const d=Math.hypot(q[0]-e.containerPoint.x,q[1]-e.containerPoint.y);if(d<bd){bd=d;b=q}}
- el.textContent=b?`Velocidad vertical: ${V[b[2]].toFixed(1)} mm/año`+(SD[b[2]]?` (±${SD[b[2]].toFixed(1)})`:''):'Ningún punto aquí'});
+  for(let pass=0;pass<2;pass++)for(let i=0;i<N;i++){const v=V[i],est=Math.abs(v)<2;if((pass==0)!==est)continue;if(Math.abs(v)<minAbs)continue;
+   const px=(X[i]-cx)*S+W/2,py=(Y[i]-cy)*S+H/2;if(px<-12||py<-12||px>W+12||py>H+12)continue;
+   g.globalAlpha=est?.55:.95;g.fillStyle=CLASES[cls(v)].col;g.beginPath();g.arc(px,py,est?r*.8:r,0,6.3);g.fill();
+   if(!est){g.strokeStyle='rgba(0,0,0,.4)';g.lineWidth=1;g.stroke()}vis.push({x:px,y:py,r:r+4,i});drawn++}
+  g.globalAlpha=1}
+ else{const cell=40,gw=Math.ceil(W/cell)+1,gh=Math.ceil(H/cell)+1,L_=gw*gh,
+   n=new Float32Array(L_),sx=new Float32Array(L_),sy=new Float32Array(L_),sv=new Float32Array(L_),
+   mn=new Float32Array(L_).fill(1e9),mx=new Float32Array(L_).fill(-1e9),nf=new Float32Array(L_);
+  for(let i=0;i<N;i++){const v=V[i];if(Math.abs(v)<minAbs)continue;const px=(X[i]-cx)*S+W/2,py=(Y[i]-cy)*S+H/2;if(px<0||py<0||px>=W||py>=H)continue;
+   const k=Math.floor(px/cell)+Math.floor(py/cell)*gw;n[k]++;sx[k]+=px;sy[k]+=py;sv[k]+=v;if(v<mn[k])mn[k]=v;if(v>mx[k])mx[k]=v;if(v<=-5)nf[k]++}
+  const cs=[];for(let k=0;k<L_;k++){if(!n[k])continue;const ext=(-mn[k]>=mx[k])?mn[k]:mx[k];
+   cs.push({x:sx[k]/n[k],y:sy[k]/n[k],n:n[k],mean:sv[k]/n[k],mn:mn[k],mx:mx[k],nf:nf[k],ext,r:n[k]==1?4:Math.min(18,6+Math.log10(n[k])*4.5)})}
+  cs.sort((a,b)=>Math.abs(a.ext)-Math.abs(b.ext));          // lo más extremo se dibuja encima
+  for(const q of cs){const est=Math.abs(q.ext)<2;g.globalAlpha=est?.5:.92;g.fillStyle=CLASES[cls(q.ext)].col;
+   g.beginPath();g.arc(q.x,q.y,q.r,0,6.3);g.fill();g.strokeStyle=est?'rgba(0,0,0,.15)':'rgba(0,0,0,.45)';g.lineWidth=1;g.stroke();q.rr=q.r+3;vis.push(q);drawn++}
+  g.globalAlpha=1}
+ document.getElementById('info').textContent=ALL?`Puntos individuales: ${drawn.toLocaleString('es')}`:`${drawn.toLocaleString('es')} zonas · zoom ${z.toFixed(1)} (zoom 15 = puntos individuales)`}
+
+map.on('click',e=>{const p=e.containerPoint;let best=null,bd=1e9;
+ for(const q of vis){const d=Math.hypot(q.x-p.x,q.y-p.y);const lim=ALL?q.r:q.rr;if(d<lim&&d<bd){bd=d;best=q}}
+ if(!best){map.closePopup();return}
+ let html,ll;
+ if(ALL){const i=best.i,v=V[i],k=cls(v);ll=[A[4*i+1],A[4*i]];
+  html=`<div class="pp"><b>${CLASES[k].txt}</b><div class="v" style="color:${k==3?'inherit':CLASES[k].col}">${f1(v)} mm/año</div>`+
+   (SD[i]?`<div class="m">Desviación estándar: ±${SD[i].toFixed(1)} mm/año</div>`:'')+
+   `<div class="m">${ll[0].toFixed(5)}, ${ll[1].toFixed(5)}</div></div>`}
+ else{const k=cls(best.ext);ll=map.containerPointToLatLng([best.x,best.y]);
+  html=`<div class="pp"><b>Zona con ${best.n.toLocaleString('es')} punto${best.n>1?'s':''}</b>`+
+   `<div>Valor más extremo: <b style="color:${k==3?'inherit':CLASES[k].col}">${f1(best.ext)} mm/año</b></div>`+
+   `<div class="m">Media: ${f1(best.mean)} · Mín: ${f1(best.mn)} · Máx: ${f1(best.mx)}</div>`+
+   `<div class="m">Puntos con hundimiento fuerte (≤ −5): ${best.nf.toLocaleString('es')} (${Math.round(100*best.nf/best.n)} %)</div>`+
+   `<div class="m"><i>Haz zoom para ver cada punto</i></div></div>`}
+ L.popup({closeButton:true}).setLatLng(ll).setContent(html).openOn(map)});
+document.getElementById('filtro').onchange=e=>{minAbs=+e.target.value;draw()};
 map.on('move zoomend viewreset',draw);map.on('resize',resize);addEventListener('resize',resize);resize();
 (async()=>{const m=document.getElementById('meta');
  try{const meta=await (await fetch('datos/meta.json',{cache:'no-cache'})).json();
-  const buf=await (await fetch('datos/puntos.bin?v='+meta.generado)).arrayBuffer();const a=new Float32Array(buf);N=a.length/4;
+  const buf=await (await fetch('datos/puntos.bin?v='+meta.generado)).arrayBuffer();A=new Float32Array(buf);N=A.length/4;
   X=new Float64Array(N);Y=new Float64Array(N);V=new Float32Array(N);SD=new Float32Array(N);
-  for(let i=0;i<N;i++){X[i]=MX(a[4*i]);Y[i]=MY(a[4*i+1]);V[i]=a[4*i+2];SD[i]=a[4*i+3]}
+  for(let i=0;i<N;i++){X[i]=MX(A[4*i]);Y[i]=MY(A[4*i+1]);V[i]=A[4*i+2];SD[i]=A[4*i+3]}
   m.textContent=`Illes Balears · EGMS ${meta.release} · ${N.toLocaleString('es')} puntos · actualizado ${meta.generado}`;draw()}
  catch(e){m.textContent='Aún no hay datos. Ejecuta la actualización en GitHub (pestaña Actions).'}})();
 </script></body></html>
