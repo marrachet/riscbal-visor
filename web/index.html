@@ -14,7 +14,7 @@ html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",sa
 #bar{height:10px;width:180px;border-radius:5px;margin:5px 0 3px;background:linear-gradient(90deg,#d73027,#ffffbf,#4575b4)}
 #lbl{display:flex;justify-content:space-between;color:var(--mut);font-size:11px}
 #info{bottom:24px;right:10px;text-align:right;max-width:50%}
-#cv{position:absolute;inset:0;z-index:450;pointer-events:none}
+#cv{position:absolute;left:0;top:0;width:100%;height:100%;z-index:450;pointer-events:none}
 </style></head><body>
 <div id="map"></div>
 <div class="box" id="title"><b>RiscBal · Movimiento vertical del terreno</b><div id="meta">Cargando datos…</div></div>
@@ -31,7 +31,7 @@ let N=0,X,Y,V,SD,vis=[],ALL=false,raf=0,dpr=1,W=0,H=0;
 function lerp(a,b,t){return a+(b-a)*t}
 function col(v){const t=(Math.max(-10,Math.min(10,v))+10)/20,A=[215,48,39],B=[255,255,191],C=[69,117,180];
  const [s,e,r]=t<.5?[A,B,t*2]:[B,C,(t-.5)*2];return `rgb(${[0,1,2].map(i=>Math.round(lerp(s[i],e[i],r))).join(',')})`}
-function resize(){dpr=window.devicePixelRatio||1;W=cv.clientWidth;H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;draw()}
+function resize(){dpr=window.devicePixelRatio||1;const sz=map.getSize();W=sz.x;H=sz.y;cv.width=W*dpr;cv.height=H*dpr;draw()}
 function draw(){cancelAnimationFrame(raf);raf=requestAnimationFrame(render)}
 function render(){g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);vis=[];if(!N)return;
  const z=map.getZoom(),S=256*Math.pow(2,z),c=map.getCenter(),cx=MX(c.lng),cy=MY(c.lat);ALL=z>=15;
@@ -49,7 +49,7 @@ function render(){g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);vis=[];if
 map.on('click',e=>{const el=document.getElementById('sel');if(!ALL){el.textContent='Acércate más (zoom 15) para ver puntos individuales';return}
  let b=null,bd=16;for(const q of vis){const d=Math.hypot(q[0]-e.containerPoint.x,q[1]-e.containerPoint.y);if(d<bd){bd=d;b=q}}
  el.textContent=b?`Velocidad vertical: ${V[b[2]].toFixed(1)} mm/año`+(SD[b[2]]?` (±${SD[b[2]].toFixed(1)})`:''):'Ningún punto aquí'});
-map.on('move zoomend viewreset',draw);addEventListener('resize',resize);resize();
+map.on('move zoomend viewreset',draw);map.on('resize',resize);addEventListener('resize',resize);resize();
 (async()=>{const m=document.getElementById('meta');
  try{const meta=await (await fetch('datos/meta.json',{cache:'no-cache'})).json();
   const buf=await (await fetch('datos/puntos.bin?v='+meta.generado)).arrayBuffer();const a=new Float32Array(buf);N=a.length/4;
@@ -58,3 +58,4 @@ map.on('move zoomend viewreset',draw);addEventListener('resize',resize);resize()
   m.textContent=`Illes Balears · EGMS ${meta.release} · ${N.toLocaleString('es')} puntos · actualizado ${meta.generado}`;draw()}
  catch(e){m.textContent='Aún no hay datos. Ejecuta la actualización en GitHub (pestaña Actions).'}})();
 </script></body></html>
+
