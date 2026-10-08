@@ -1,0 +1,53 @@
+name: Actualizar datos EGMS y publicar visor
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"          # cada lunes a las 05:00 UTC
+  workflow_dispatch:             # botón manual
+    inputs:
+      forzar:
+        description: "¿Forzar la descarga aunque no haya versión nueva? (true/false)"
+        default: "false"
+  push:
+    branches: [main]
+    paths: ["web/index.html"]    # si cambias el visor, se vuelve a publicar
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar herramientas
+        run: pip install requests pyjwt cryptography pandas numpy pyproj
+      - name: Comprobar y descargar datos del EGMS
+        env:
+          EGMS_TOKEN: ${{ secrets.EGMS_TOKEN }}
+          FORZAR: ${{ github.event.inputs.forzar || 'false' }}
+        run: python scripts/actualizar.py
+      - name: Guardar datos nuevos en el repositorio
+        run: |
+          git config user.name "robot-riscbal"
+          git config user.email "robot-riscbal@users.noreply.github.com"
+          git add web/datos
+          git diff --cached --quiet || (git commit -m "Datos EGMS actualizados" && git push)
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4
